@@ -52,12 +52,15 @@ static  int         num_processes_joined = 0;
 static  int         num_processes;
 static  int         process_id;
 static  int         num_messages;
+static  int         num_finished_processes = 0;
+
 
 #define MAX_MESSLEN 1212
 #define MAX_MEMBERS 10
 #define BURST_SIZE  100
 /* Function prototypes */
 static	void	    Read_message();
+static  void	    burst_message();
 static	void	    Usage( int argc, char *argv[] );
 static  void        Print_help();
 static  void	    Bye();
@@ -82,11 +85,14 @@ int main( int argc, char *argv[] )
 		    SP_error( ret );
 		    Bye();
 	    }
+        if (DEBUG) {
 	        printf("User: connected to %s with private group %s\n", Spread_name, Private_group );
-        
+        }
+
         /* Join group */
         ret = SP_join( Mbox, group );
         if( ret < 0 ) SP_error( ret );
+        num_processes_joined++;
 
         /* Set up event handling and queue message bursting */
 	    E_init();
@@ -154,34 +160,35 @@ static	void	Read_message() {
 		Bye();
 	}
 
-	if( Is_regular_mess( service_type ) )
-	{
+	if( Is_regular_mess( service_type ) ) {
 		mess[ret] = 0;
-		if (!Is_agreed_mess(service_type)){
+		if (!Is_agreed_mess(service_type)) {
             perror("mcast: non-agreed service message received\n");
             Bye();
         }
-		if (DEBUG)  
+		if (DEBUG) { 
             printf("message from %s, of type %d, (endian %d) to %d groups \n(%d bytes): %s\n",
 			sender, mess_type, endian_mismatch, num_groups, ret, mess );
-	}else if( Is_membership_mess( service_type ) )
-        {
+        }
+	} else if( Is_membership_mess( service_type ) ) {
                 ret = SP_get_memb_info( mess, service_type, &memb_info );
                 if (ret < 0) {
                         printf("BUG: membership message does not have valid body\n");
                         SP_error( ret );
                         Bye();
                 }
-		if     ( Is_reg_memb_mess( service_type ) )
-		{
+		if ( Is_reg_memb_mess( service_type ) ) {
 			printf("Received REGULAR membership for group %s with %d members, where I am member %d:\n",
 				sender, num_groups, mess_type );
 			for( i=0; i < num_groups; i++ )
 				printf("\t%s\n", &target_groups[i][0] );
 			printf("grp id is %d %d %d\n",memb_info.gid.id[0], memb_info.gid.id[1], memb_info.gid.id[2] );
 
-			if( Is_caused_join_mess( service_type ) )
-			{
+			if( Is_caused_join_mess( service_type ) ) {
+                num_processes_joined++;
+                if (num_processes_joined == num_processes) {
+                    burst_message();
+                }
 				printf("Due to the JOIN of %s\n", memb_info.changed_member );
 			}else if( Is_caused_leave_mess( service_type ) ){
 				printf("Due to the LEAVE of %s\n", memb_info.changed_member );
@@ -189,37 +196,17 @@ static	void	Read_message() {
 				printf("Due to the DISCONNECT of %s\n", memb_info.changed_member );
 			}else if( Is_caused_network_mess( service_type ) ){
 				printf("Due to NETWORK change with %u VS sets\n", memb_info.num_vs_sets);
-                                num_vs_sets = SP_get_vs_sets_info( mess, &vssets[0], MAX_VSSETS, &my_vsset_index );
-                                if (num_vs_sets < 0) {
-                                        printf("BUG: membership message has more then %d vs sets. Recompile with larger MAX_VSSETS\n", MAX_VSSETS);
-                                        SP_error( num_vs_sets );
-                                        exit( 1 );
-                                }
-                                for( i = 0; i < num_vs_sets; i++ )
-                                {
-                                        printf("%s VS set %d has %u members:\n",
-                                               (i  == my_vsset_index) ?
-                                               ("LOCAL") : ("OTHER"), i, vssets[i].num_members );
-                                        ret = SP_get_vs_set_members(mess, &vssets[i], members, MAX_MEMBERS);
-                                        if (ret < 0) {
-                                                printf("VS Set has more then %d members. Recompile with larger MAX_MEMBERS\n", MAX_MEMBERS);
-                                                SP_error( ret );
-                                                exit( 1 );
-                                        }
-                                        for( j = 0; j < vssets[i].num_members; j++ )
-                                                printf("\t%s\n", members[j] );
-                                }
 			}
-		}else if( Is_transition_mess(   service_type ) ) {
+		} else if( Is_transition_mess(   service_type ) ) {
 			printf("received TRANSITIONAL membership for group %s\n", sender );
-		}else if( Is_caused_leave_mess( service_type ) ){
+		} else if( Is_caused_leave_mess( service_type ) ){
 			printf("received membership message that left group %s\n", sender );
-		}else printf("received incorrecty membership message of type 0x%x\n", service_type );
-        } else if ( Is_reject_mess( service_type ) )
+		} else printf("received incorrecty membership message of type 0x%x\n", service_type );
+    } else if ( Is_reject_mess( service_type ) )
         {
 		printf("REJECTED message from %s, of servicetype 0x%x messtype %d, (endian %d) to %d groups \n(%d bytes): %s\n",
 			sender, service_type, mess_type, endian_mismatch, num_groups, ret, mess );
-	}else printf("received message of unknown message type 0x%x with ret %d\n", service_type, ret);
+	} else printf("received message of unknown message type 0x%x with ret %d\n", service_type, ret);
 
 
 	printf("\n");
@@ -231,6 +218,8 @@ static	void	Usage(int argc, char *argv[])
 {
 	sprintf( User, "bglickm1" );
 	sprintf( Spread_name, "4803");
+    sprintf( group, "bglickm1");
+
     if (argc != 4) {
         Print_help();
     } else {
