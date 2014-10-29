@@ -39,7 +39,7 @@
 #include <string.h>
 
 #define int32u      unsigned int
-#define DEBUG       1
+#define DEBUG      1 
 
 static	char	    User[80];
 static  char        Spread_name[80];
@@ -48,16 +48,30 @@ static  char        group[MAX_GROUP_NAME];
 static  mailbox     Mbox;
 static	int	        Num_sent;
 static  int         To_exit = 0; // TODO: WAT DO?
-static  int         num_processes_joined = 0;
 static  int         num_processes;
-static  int         process_id;
+static  int         process_index;
 static  int         num_messages;
 static  int         num_finished_processes = 0;
+static  int         num_messages_received = 0;
+static  FILE        *fd = NULL;
 
-
+#define PAYLOAD_SIZE 1200
 #define MAX_MESSLEN 1212
 #define MAX_MEMBERS 10
-#define BURST_SIZE  100
+#define BURST_SIZE  10 
+#define BURST_OFFSET BURST_SIZE-1 
+#define MAX_GROUPS  MAX_MEMBERS
+#define RAND_RANGE_MAX  1000000
+
+/* Message: Struct for multicasted message */
+typedef struct {
+    int         process_index;
+    int         message_index;
+    int         rand;
+    char        payload[PAYLOAD_SIZE];
+} Message;
+
+
 /* Function prototypes */
 static	void	    Read_message();
 static  void	    burst_message();
@@ -92,12 +106,10 @@ int main( int argc, char *argv[] )
         /* Join group */
         ret = SP_join( Mbox, group );
         if( ret < 0 ) SP_error( ret );
-        num_processes_joined++;
 
         /* Set up event handling and queue message bursting */
 	    E_init();
 	    E_attach_fd( Mbox, READ_FD, Read_message, 0, NULL, HIGH_PRIORITY );
-	    /* TODO: Enqueue message bursting if messages to send > 0 */
         Num_sent = 0;
         
         /* Begin event handling */
@@ -110,23 +122,41 @@ int main( int argc, char *argv[] )
 static void	burst_message()
 {
 	char	        mess[MAX_MESSLEN];
-	int	            num_groups;
-	unsigned int	mess_len;
+	unsigned int	mess_len = MAX_MESSLEN;
 	int	            ret;
+    int             mess_type = 0;
 	int	            i;
 
-    /* TODO: Stop if we've sent all we need to send */
-    for( i=0; i < BURST_SIZE; i++ )
-    {
-        Num_sent++;
-        /* TODO: Generate messages */
-        ret= SP_multicast( Mbox, FIFO_MESS, group, 2, mess_len, mess );
+    if (num_messages == 0) {
+        mess_type = 1;
+        ((Message *)(mess))->message_index = -1;
+        ret= SP_multicast( Mbox, AGREED_MESS, group, mess_type, mess_len, mess );
 
         if( ret < 0 ) 
         {
             SP_error( ret );
             Bye();
         }
+    }
+    for( i=0; i < BURST_SIZE && Num_sent+1 <= num_messages; i++ ) {
+        ((Message *)(mess))->process_index = process_index;
+        ((Message *)(mess))->message_index = Num_sent;
+        ((Message *)(mess))->rand = (rand() % RAND_RANGE_MAX) + 1;
+        /* TODO: Generate messages */
+        Num_sent++;
+        /* Process has sent all its messages. */
+        if (Num_sent == num_messages) {
+            /* Set mess_type to indicate that it is last message (process is done). */
+            mess_type = 1;
+        }
+        ret= SP_multicast( Mbox, AGREED_MESS, group, mess_type, mess_len, mess );
+
+        if( ret < 0 ) 
+        {
+            SP_error( ret );
+            Bye();
+        }
+
         if (DEBUG)
             printf("sent message %d (total %d)\n", i+1, Num_sent );
     }
@@ -140,19 +170,21 @@ static	void	Read_message() {
     /* Local vars */
     static char	    mess[MAX_MESSLEN];
     char		    sender[MAX_GROUP_NAME];
-    char		    target_groups[MAX_MEMBERS][MAX_GROUP_NAME];
+    char		    target_groups[MAX_GROUPS][MAX_GROUP_NAME];
     membership_info memb_info;
     int		        num_groups;
     int		        service_type;
     int16		    mess_type;
     int		        endian_mismatch;
-    int		        i,j;
+    int		        i;
     int		        ret;
+    Message         *message;
 
     service_type = 0;
-	ret = SP_receive( Mbox, &service_type, sender, 100, &num_groups, target_groups, 
+	ret = SP_receive( Mbox, &service_type, sender, MAX_GROUPS, &num_groups, target_groups, 
 		&mess_type, &endian_mismatch, sizeof(mess), mess );
-	printf("\n============================\n");
+
+	if (DEBUG) printf("\n============================\n");
 	
     if( ret < 0 ) 
 	{
@@ -161,7 +193,7 @@ static	void	Read_message() {
 	}
 
 	if( Is_regular_mess( service_type ) ) {
-		mess[ret] = 0;
+		
 		if (!Is_agreed_mess(service_type)) {
             perror("mcast: non-agreed service message received\n");
             Bye();
@@ -169,6 +201,24 @@ static	void	Read_message() {
 		if (DEBUG) { 
             printf("message from %s, of type %d, (endian %d) to %d groups \n(%d bytes): %s\n",
 			sender, mess_type, endian_mismatch, num_groups, ret, mess );
+            printf("%d message received\n", num_messages_received+1);
+        }
+        /* Done for more readable code for writing to file. */
+        message = (Message *)mess;
+        if (message->message_index >= 0) {
+        
+            num_messages_received++;
+            /* Write message content to file. */
+            fprintf( fd, "%2d, %8d, %8d\n", message->process_index, message->message_index, message->rand);
+        }
+
+        if (mess_type == 1 && ++num_finished_processes == num_processes) {
+            /* All processes have finished sending (and therefore, all are done receiving).*/
+            Bye();
+        }
+        if (Num_sent < num_messages && message->process_index == process_index 
+            && (message->message_index % BURST_SIZE) == BURST_OFFSET) {
+            burst_message();
         }
 	} else if( Is_membership_mess( service_type ) ) {
                 ret = SP_get_memb_info( mess, service_type, &memb_info );
@@ -178,22 +228,26 @@ static	void	Read_message() {
                         Bye();
                 }
 		if ( Is_reg_memb_mess( service_type ) ) {
-			printf("Received REGULAR membership for group %s with %d members, where I am member %d:\n",
-				sender, num_groups, mess_type );
-			for( i=0; i < num_groups; i++ )
-				printf("\t%s\n", &target_groups[i][0] );
-			printf("grp id is %d %d %d\n",memb_info.gid.id[0], memb_info.gid.id[1], memb_info.gid.id[2] );
-
+            if (DEBUG) {
+    			printf("Received REGULAR membership for group %s with %d members, where I am member %d:\n",
+	    			sender, num_groups, mess_type );
+                for( i=0; i < num_groups; i++ )
+                    printf("\t%s\n", &target_groups[i][0] );
+                printf("grp id is %d %d %d\n",memb_info.gid.id[0], memb_info.gid.id[1], memb_info.gid.id[2] );
+            }
 			if( Is_caused_join_mess( service_type ) ) {
-                num_processes_joined++;
-                if (num_processes_joined == num_processes) {
+                /* If everyone has joined, burst out messages.*/
+                if (num_groups == num_processes) {
                     burst_message();
                 }
-				printf("Due to the JOIN of %s\n", memb_info.changed_member );
+				if (DEBUG) { 
+                    printf("Due to the JOIN of %s\n", memb_info.changed_member );
+                }
 			}else if( Is_caused_leave_mess( service_type ) ){
 				printf("Due to the LEAVE of %s\n", memb_info.changed_member );
 			}else if( Is_caused_disconnect_mess( service_type ) ){
-				printf("Due to the DISCONNECT of %s\n", memb_info.changed_member );
+				printf("Due to the DISCONNECT of %s\n Will now exit mcast\n", memb_info.changed_member );
+                Bye();
 			}else if( Is_caused_network_mess( service_type ) ){
 				printf("Due to NETWORK change with %u VS sets\n", memb_info.num_vs_sets);
 			}
@@ -201,17 +255,15 @@ static	void	Read_message() {
 			printf("received TRANSITIONAL membership for group %s\n", sender );
 		} else if( Is_caused_leave_mess( service_type ) ){
 			printf("received membership message that left group %s\n", sender );
-		} else printf("received incorrecty membership message of type 0x%x\n", service_type );
-    } else if ( Is_reject_mess( service_type ) )
-        {
+		} else {
+            printf("received incorrecty membership message of type 0x%x\n", service_type );
+        }
+    } else if ( Is_reject_mess( service_type ) ) {
 		printf("REJECTED message from %s, of servicetype 0x%x messtype %d, (endian %d) to %d groups \n(%d bytes): %s\n",
 			sender, service_type, mess_type, endian_mismatch, num_groups, ret, mess );
-	} else printf("received message of unknown message type 0x%x with ret %d\n", service_type, ret);
-
-
-	printf("\n");
-	printf("User> ");
-	fflush(stdout);
+	} else {
+        printf("received message of unknown message type 0x%x with ret %d\n", service_type, ret);
+    }
 }
 
 static	void	Usage(int argc, char *argv[])
@@ -224,12 +276,19 @@ static	void	Usage(int argc, char *argv[])
         Print_help();
     } else {
         num_messages = atoi(argv[1]);            // Number of messages
-        process_id   = atoi(argv[2]);             // Process index
+        process_index   = atoi(argv[2]);             // Process index
         num_processes = atoi(argv[3]);           // Number of processes
 
         /* Check number of processes */
         if(num_processes > MAX_MEMBERS) {
             perror("mcast: arguments error - too many processes\n");
+            exit(0);
+        }
+        /* Open file writer */
+        char file_name[15];
+        sprintf(file_name, "%d", process_index);
+        if((fd = fopen(strcat(file_name, ".out"), "w")) == NULL) {
+            perror("fopen failed to open file for writing");
             exit(0);
         }
     }
@@ -243,8 +302,12 @@ static  void    Print_help()
 static  void	Bye()
 {
 	To_exit = 1;
+    if (fd != NULL) {
+        fclose(fd);
+        fd = NULL;
+    }
 
-	printf("\nBye.\n");
+	printf("\nExiting mcast.\n");
 
 	SP_disconnect( Mbox );
 
