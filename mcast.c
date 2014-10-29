@@ -48,6 +48,10 @@ static  char        group[MAX_GROUP_NAME];
 static  mailbox     Mbox;
 static	int	        Num_sent;
 static  int         To_exit = 0; // TODO: WAT DO?
+static  int         num_processes_joined = 0;
+static  int         num_processes;
+static  int         process_id;
+static  int         num_messages;
 
 #define MAX_MESSLEN 1212
 #define MAX_MEMBERS 10
@@ -225,36 +229,27 @@ static	void	Read_message() {
 
 static	void	Usage(int argc, char *argv[])
 {
-	sprintf( User, "user" );
+	sprintf( User, "bglickm1" );
 	sprintf( Spread_name, "4803");
-	while( --argc > 0 )
-	{
-		argv++;
+    if (argc != 4) {
+        Print_help();
+    } else {
+        num_messages = atoi(argv[1]);            // Number of messages
+        process_id   = atoi(argv[2]);             // Process index
+        num_processes = atoi(argv[3]);           // Number of processes
 
-		if( !strncmp( *argv, "-u", 2 ) )
-		{
-                        if (argc < 2) Print_help();
-                        strcpy( User, argv[1] );
-                        argc--; argv++;
-		}else if( !strncmp( *argv, "-r", 2 ) )
-		{
-			strcpy( User, "" );
-		}else if( !strncmp( *argv, "-s", 2 ) ){
-                        if (argc < 2) Print_help();
-			strcpy( Spread_name, argv[1] ); 
-			argc--; argv++;
-		}else{
-                    Print_help();
-                }
-	 }
+        /* Check number of processes */
+        if(num_processes > MAX_MEMBERS) {
+            perror("mcast: arguments error - too many processes\n");
+            exit(0);
+        }
+    }
 }
 static  void    Print_help()
 {
-    printf( "Usage: spuser\n%s\n%s\n%s\n",
-            "\t[-u <user name>]  : unique (in this machine) user name",
-            "\t[-s <address>]    : either port or port@machine",
-            "\t[-r ]    : use random user name");
-    exit( 0 );
+    printf("Usage: mcast <num_of_messages> <process_index>\
+        <num_of_processes>\n");
+    exit(0);
 }
 static  void	Bye()
 {
