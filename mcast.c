@@ -62,7 +62,7 @@ static  FILE        *fd = NULL;
 #define BURST_SIZE_INIT 300
 #define BURST_SIZE      20
 #define BURST_OFFSET    0
-#define RECEIVE_MAX     400
+#define RECEIVE_MAX     100
 #define MAX_GROUPS      MAX_MEMBERS
 #define RAND_RANGE_MAX  1000000
 
@@ -180,20 +180,14 @@ static void	Read_message() {
     int		        service_type;
     int16		    mess_type;
     int		        endian_mismatch;
-    int		        i, j;
+    int		        i;
     int		        ret;
     int             bytes;
     int             received;
     Message         *message;
 
-    /* Poll spready mailbox */
-    /*bytes = SP_poll(Mbox);
-    if (DEBUG)
-        printf("polled bytes = %d\n", bytes); */
-    
     /* Process messages */
-    //for (j = 0; j < bytes / MAX_MESSLEN; j++) // Loop for number of messages available
-    bytes = 1;
+    bytes = 1; // Set to non-zero so loop iterates at least once
     received = 0;
     while (bytes != 0 && received < RECEIVE_MAX)
     {    
@@ -289,6 +283,8 @@ static void	Read_message() {
         } else {
             printf("received message of unknown message type 0x%x with ret %d\n", service_type, ret);
         }
+        
+        // Poll mailbox and increment received counter:
         bytes = SP_poll(Mbox);
         received++;
     }
