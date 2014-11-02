@@ -1,4 +1,11 @@
 /*
+ *  Ben Glickman and Ethan Bennis
+ *  CS437: Distributed Systems
+ *  Practical Exercise 3
+ *  November 3rd, 2014
+ */
+
+/*
  * The Spread Toolkit.
  *     
  * The contents of this file are subject to the Spread Open-Source
@@ -43,17 +50,27 @@
 #define PAYLOAD_SIZE    1200
 #define MAX_MESSLEN     1212
 #define MAX_MEMBERS     10
-#define BURST_SIZE_INIT 20
+#define BURST_SIZE_INIT 200
 #define BURST_SIZE      20
-#define BURST_OFFSET    0
+#define BURST_OFFSET    19
 #define MAX_GROUPS      100
 #define RAND_RANGE_MAX  1000000
 
+/* Message: Struct for multicasted message */
+typedef struct {
+    int             process_index;
+    int             message_index;
+    int             rand;
+    char            payload[PAYLOAD_SIZE];
+} Message;
+
+/* Globals */
 char	    User[80];
 char        Spread_name[80];
 char        Private_group[MAX_GROUP_NAME];
 char        group[MAX_GROUP_NAME];
 mailbox     Mbox;
+Message     *messages[BURST_SIZE_INIT];
 int	        Num_sent;
 struct      timeval start_time;
 struct      timeval end_time;
@@ -63,14 +80,6 @@ int         num_messages;
 int         num_finished_processes = 0;
 int         num_messages_received = 0;
 FILE        *fd = NULL;
-
-/* Message: Struct for multicasted message */
-typedef struct {
-    int             process_index;
-    int             message_index;
-    int             rand;
-    char            payload[PAYLOAD_SIZE];
-} Message;
 
 /* Function prototypes */
 static	void	    Read_message();
@@ -88,6 +97,10 @@ int main( int argc, char *argv[] )
     /* Set timeouts */
     test_timeout.sec = 0;
     test_timeout.usec = 100000;
+
+    /* Allocate memory for message burst */
+    for (int i = 0; i < BURST_SIZE_INIT; i++)
+        messages[i] = malloc(sizeof(Message));
     
     /* Parse arguments, display usage if invalid */
     Usage(argc, argv);
@@ -126,6 +139,7 @@ static void	burst_message(int burst_size)
 	int	            ret;
     int             mess_type = 0;
 	int	            i;
+    int             burst_sent = 0;
     struct          timeval burst_start_time;
     struct          timeval burst_end_time;
     
@@ -143,18 +157,23 @@ static void	burst_message(int burst_size)
             Bye();
         }
     }
-    /* TODO: Make messages in bulk, then send? */
+
     for (i=0; i < burst_size && Num_sent+1 <= num_messages; i++) {
-        ((Message *)(mess))->process_index = process_index;
-        ((Message *)(mess))->message_index = Num_sent;
-        ((Message *)(mess))->rand = (rand() % RAND_RANGE_MAX) + 1;
+        messages[i]->process_index = process_index;
+        messages[i]->message_index = Num_sent;
+        messages[i]->rand = (rand() % RAND_RANGE_MAX) + 1;
+
+        burst_sent++;
         Num_sent++;
+    }
+
+    for (i=0; i < burst_sent; i++) {
         /* Process has sent all its messages. */
-        if (Num_sent == num_messages) {
+        if (i == burst_sent-1 && Num_sent == num_messages) {
             /* Set mess_type to indicate that it is last message (process is done). */
             mess_type = 1;
         }
-        ret= SP_multicast(Mbox, AGREED_MESS, group, mess_type, mess_len, mess);
+        ret= SP_multicast(Mbox, AGREED_MESS, group, mess_type, sizeof(Message), (char *)messages[i]);
 
         if(ret < 0) 
         {
@@ -165,6 +184,7 @@ static void	burst_message(int burst_size)
         if (DEBUG)
             printf("sent message %d (total %d)\n", i+1, Num_sent);
     }
+    
     if(DEBUG){
         gettimeofday(&burst_end_time, 0);  // End of read function (including burst, if there was one)
         int total_time = (burst_end_time.tv_sec*1e6 + burst_end_time.tv_usec)
@@ -190,8 +210,9 @@ static void	Read_message() {
     struct          timeval read_end_time;
 
     if(DEBUG)
-        gettimeofday(&read_start_time, 0);  // Start of read function
+        gettimeofday(&read_start_time, 0);  // Start time of read function
 
+    /* Receive message */
     service_type = 0;
 	ret = SP_receive(Mbox, &service_type, sender, MAX_GROUPS, &num_groups, target_groups, 
 		&mess_type, &endian_mismatch, sizeof(mess), mess);
@@ -205,8 +226,9 @@ static void	Read_message() {
 		Bye();
 	}
     else if (DEBUG)
-        printf("SP_receive return value: %d\n", ret);
+        printf("SP_receive successful, return value: %d\n", ret);
 
+    /* Process message based on type */
 	if(Is_regular_mess(service_type)) { // Regular message
 	
         /* Check if message has agreed service type */	
@@ -221,7 +243,7 @@ static void	Read_message() {
             printf("%d message received\n", num_messages_received+1);
         }
 
-        /* Done for more readable code for writing to file. */
+        /* Cast to message struct for readability */
         message = (Message *)mess;
         if (message->message_index >= 0) {
             num_messages_received++;
@@ -246,14 +268,14 @@ static void	Read_message() {
             && (message->message_index % BURST_SIZE) == BURST_OFFSET) {
             burst_message(BURST_SIZE);
         }
-	} else if(Is_membership_mess(service_type)) {
+	} else if(Is_membership_mess(service_type)) {   // Membership message
         ret = SP_get_memb_info(mess, service_type, &memb_info);
         if (ret < 0) {
                 printf("BUG: membership message does not have valid body\n");
                 SP_error(ret);
                 Bye();
         }
-		if (Is_reg_memb_mess(service_type)) {
+		if (Is_reg_memb_mess(service_type)) {   // Regular membership message
             if (DEBUG) {
     			printf("Received REGULAR membership for group %s with %d members, where I am member %d:\n",
 	    			sender, num_groups, mess_type);
@@ -261,7 +283,7 @@ static void	Read_message() {
                     printf("\t%s\n", &target_groups[i][0]);
                 printf("grp id is %d %d %d\n",memb_info.gid.id[0], memb_info.gid.id[1], memb_info.gid.id[2]);
             }
-			if(Is_caused_join_mess(service_type)) {
+			if(Is_caused_join_mess(service_type)) { // Join message
 				if (DEBUG) { 
                     printf("Due to the JOIN of %s\n", memb_info.changed_member);
                 }
@@ -271,23 +293,24 @@ static void	Read_message() {
                     gettimeofday(&start_time, 0);
                     burst_message(BURST_SIZE_INIT);
                 }
-			} else if (Is_caused_leave_mess( service_type)){
+			} else if (Is_caused_leave_mess( service_type)){    // Leave message
 				printf("Due to the LEAVE of %s\n", memb_info.changed_member);
-			} else if (Is_caused_disconnect_mess(service_type)){
+			} else if (Is_caused_disconnect_mess(service_type)){    // Disconnect message
 				printf("Due to the DISCONNECT of %s\n Will now exit mcast\n", memb_info.changed_member );
                 Bye();
-            } else
-                printf("received message of unknown message type 0x%x with ret %d\n", service_type, ret);
+            } else  // Other message type
+                printf("received message of other type 0x%x with ret %d\n", service_type, ret);
         }
     }   
     if(DEBUG){
         gettimeofday(&read_end_time, 0);  // End of read function (including burst, if there was one)
         int total_time = (read_end_time.tv_sec*1e6 + read_end_time.tv_usec)
             - (read_start_time.tv_sec*1e6 + read_start_time.tv_usec);
-        printf("Measured ~read time (including burst, if present): %d us\n", (total_time));
+        printf("Measured ~read time (including burst, if occured): %d us\n", (total_time));
     }
 }
 
+/* Process arguments, display help if invalid */
 static void Usage(int argc, char *argv[])
 {
 	sprintf( User, "ebennis1" );
@@ -316,6 +339,7 @@ static void Usage(int argc, char *argv[])
     }
 }
 
+/* Display usage help */
 static void Print_help()
 {
     printf("Usage: mcast <num_of_messages> <process_index>\
@@ -323,6 +347,7 @@ static void Print_help()
     exit(0);
 }
 
+/* Close file writer and exit */
 static void	Bye()
 {
     printf("Closing file.\n");

@@ -1,6 +1,6 @@
 CC=gcc
 LD=gcc
-CFLAGS = -c -std=c99 -Wall -Wextra -pedantic -g -D_GNU_SOURCE
+CFLAGS = -c -std=c99 -Wall -Wextra -pedantic -g 
 CPPFLAGS=-I. -I/home/cs437/exercises/ex3/include
 SP_LIBRARY_DIR=/home/cs437/exercises/ex3
 
