@@ -39,31 +39,30 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DEBUG       0 
-
-static	char	    User[80];
-static  char        Spread_name[80];
-static  char        Private_group[MAX_GROUP_NAME];
-static  char        group[MAX_GROUP_NAME];
-static  mailbox     Mbox;
-static	int	        Num_sent;
-static  struct      timeval start_time;
-static  struct      timeval end_time;
-static  int         num_processes;
-static  int         process_index;
-static  int         num_messages;
-static  int         num_finished_processes = 0;
-static  int         num_messages_received = 0;
-static  FILE        *fd = NULL;
-
+#define DEBUG           1
 #define PAYLOAD_SIZE    1200
 #define MAX_MESSLEN     1212
 #define MAX_MEMBERS     10
-#define BURST_SIZE_INIT 300
+#define BURST_SIZE_INIT 120
 #define BURST_SIZE      20
 #define BURST_OFFSET    0
 #define MAX_GROUPS      MAX_MEMBERS
 #define RAND_RANGE_MAX  1000000
+
+char	    User[80];
+char        Spread_name[80];
+char        Private_group[MAX_GROUP_NAME];
+char        group[MAX_GROUP_NAME];
+mailbox     Mbox;
+int	        Num_sent;
+struct      timeval start_time;
+struct      timeval end_time;
+int         num_processes;
+int         process_index;
+int         num_messages;
+int         num_finished_processes = 0;
+int         num_messages_received = 0;
+FILE        *fd = NULL;
 
 /* Message: Struct for multicasted message */
 typedef struct {
@@ -72,7 +71,6 @@ typedef struct {
     int             rand;
     char            payload[PAYLOAD_SIZE];
 } Message;
-
 
 /* Function prototypes */
 static	void	    Read_message();
@@ -88,8 +86,8 @@ int main( int argc, char *argv[] )
     sp_time test_timeout;
 
     /* Set timeouts */
-    test_timeout.sec = 5;
-    test_timeout.usec = 0;
+    test_timeout.sec = 0;
+    test_timeout.usec = 100000;
     
     /* Parse arguments, display usage if invalid */
     Usage(argc, argv);
@@ -97,7 +95,7 @@ int main( int argc, char *argv[] )
     /* Connect to spread group */
     ret = SP_connect_timeout( Spread_name, User, 0, 1, &Mbox, Private_group, test_timeout );
     if(ret != ACCEPT_SESSION) 
-    {
+   {
         SP_error(ret);
         Bye();
     }
@@ -128,6 +126,11 @@ static void	burst_message(int burst_size)
 	int	            ret;
     int             mess_type = 0;
 	int	            i;
+    struct          timeval burst_start_time;
+    struct          timeval burst_end_time;
+    
+    if(DEBUG)
+        gettimeofday(&burst_start_time, 0);  // Start of read function
 
     if (num_messages == 0) {
         mess_type = 1;
@@ -140,11 +143,11 @@ static void	burst_message(int burst_size)
             Bye();
         }
     }
+    /* TODO: Make messages in bulk, then send? */
     for (i=0; i < burst_size && Num_sent+1 <= num_messages; i++) {
         ((Message *)(mess))->process_index = process_index;
         ((Message *)(mess))->message_index = Num_sent;
         ((Message *)(mess))->rand = (rand() % RAND_RANGE_MAX) + 1;
-        /* TODO: Generate messages */
         Num_sent++;
         /* Process has sent all its messages. */
         if (Num_sent == num_messages) {
@@ -162,11 +165,17 @@ static void	burst_message(int burst_size)
         if (DEBUG)
             printf("sent message %d (total %d)\n", i+1, Num_sent);
     }
+    if(DEBUG){
+        gettimeofday(&burst_end_time, 0);  // End of read function (including burst, if there was one)
+        int total_time = (burst_end_time.tv_sec*1e6 + burst_end_time.tv_usec)
+            - (burst_start_time.tv_sec*1e6 + burst_start_time.tv_usec);
+        printf("Measured ~burst time: %d us\n", (total_time));
+    }
 }
 
 static void	Read_message() {
     /* Local vars */
-    char	    mess[MAX_MESSLEN];
+    char	        mess[MAX_MESSLEN];
     char		    sender[MAX_GROUP_NAME];
     char		    target_groups[MAX_GROUPS][MAX_GROUP_NAME];
     membership_info memb_info;
@@ -177,6 +186,11 @@ static void	Read_message() {
     int		        i;
     int		        ret;
     Message         *message;
+    struct          timeval read_start_time;
+    struct          timeval read_end_time;
+
+    if(DEBUG)
+        gettimeofday(&read_start_time, 0);  // Start of read function
 
     service_type = 0;
 	ret = SP_receive(Mbox, &service_type, sender, MAX_GROUPS, &num_groups, target_groups, 
@@ -245,14 +259,14 @@ static void	Read_message() {
                 printf("grp id is %d %d %d\n",memb_info.gid.id[0], memb_info.gid.id[1], memb_info.gid.id[2]);
             }
 			if(Is_caused_join_mess(service_type)) {
+				if (DEBUG) { 
+                    printf("Due to the JOIN of %s\n", memb_info.changed_member);
+                }
                 /* If everyone has joined, begin bursting messages.*/
                 if (num_groups == num_processes) {
                     printf("Full group membership acheived\n");
                     gettimeofday(&start_time, 0);
                     burst_message(BURST_SIZE_INIT);
-                }
-				if (DEBUG) { 
-                    printf("Due to the JOIN of %s\n", memb_info.changed_member);
                 }
 			}else if (Is_caused_leave_mess( service_type)){
 				printf("Due to the LEAVE of %s\n", memb_info.changed_member);
@@ -274,6 +288,13 @@ static void	Read_message() {
 			sender, service_type, mess_type, endian_mismatch, num_groups, ret, mess);
 	} else {
         printf("received message of unknown message type 0x%x with ret %d\n", service_type, ret);
+    }
+    
+    if(DEBUG){
+        gettimeofday(&read_end_time, 0);  // End of read function (including burst, if there was one)
+        int total_time = (read_end_time.tv_sec*1e6 + read_end_time.tv_usec)
+            - (read_start_time.tv_sec*1e6 + read_start_time.tv_usec);
+        printf("Measured ~read time (including burst, if present): %d us\n", (total_time));
     }
 }
 
@@ -304,12 +325,14 @@ static void Usage(int argc, char *argv[])
         }
     }
 }
+
 static void Print_help()
 {
     printf("Usage: mcast <num_of_messages> <process_index>\
         <num_of_processes>\n");
     exit(0);
 }
+
 static void	Bye()
 {
     printf("Closing file.\n");
