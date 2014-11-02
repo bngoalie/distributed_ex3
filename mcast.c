@@ -39,14 +39,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DEBUG           1
+#define DEBUG           0
 #define PAYLOAD_SIZE    1200
 #define MAX_MESSLEN     1212
 #define MAX_MEMBERS     10
-#define BURST_SIZE_INIT 120
+#define BURST_SIZE_INIT 20
 #define BURST_SIZE      20
 #define BURST_OFFSET    0
-#define MAX_GROUPS      MAX_MEMBERS
+#define MAX_GROUPS      100
 #define RAND_RANGE_MAX  1000000
 
 char	    User[80];
@@ -196,13 +196,16 @@ static void	Read_message() {
 	ret = SP_receive(Mbox, &service_type, sender, MAX_GROUPS, &num_groups, target_groups, 
 		&mess_type, &endian_mismatch, sizeof(mess), mess);
 
-	if (DEBUG) printf("\n============================\n");
+	if (DEBUG) 
+        printf("\n============================\n");
 	
     if(ret < 0) 
 	{
         SP_error(ret);
 		Bye();
 	}
+    else if (DEBUG)
+        printf("SP_receive return value: %d\n", ret);
 
 	if(Is_regular_mess(service_type)) { // Regular message
 	
@@ -223,7 +226,7 @@ static void	Read_message() {
         if (message->message_index >= 0) {
             num_messages_received++;
             /* Write message content to file. */
-            fprintf( fd, "%2d, %8d, %8d\n", message->process_index, message->message_index, message->rand);
+//            fprintf( fd, "%2d, %8d, %8d\n", message->process_index, message->message_index, message->rand);
         }
 
         /* Check if all machines have finished */
@@ -268,28 +271,15 @@ static void	Read_message() {
                     gettimeofday(&start_time, 0);
                     burst_message(BURST_SIZE_INIT);
                 }
-			}else if (Is_caused_leave_mess( service_type)){
+			} else if (Is_caused_leave_mess( service_type)){
 				printf("Due to the LEAVE of %s\n", memb_info.changed_member);
-			}else if (Is_caused_disconnect_mess(service_type)){
+			} else if (Is_caused_disconnect_mess(service_type)){
 				printf("Due to the DISCONNECT of %s\n Will now exit mcast\n", memb_info.changed_member );
                 Bye();
-			}else if (Is_caused_network_mess(service_type)){
-				printf("Due to NETWORK change with %u VS sets\n", memb_info.num_vs_sets);
-			}
-		} else if(Is_transition_mess(service_type)) {
-			printf("received TRANSITIONAL membership for group %s\n", sender);
-		} else if( Is_caused_leave_mess( service_type)){
-			printf("received membership message that left group %s\n", sender);
-		} else {
-            printf("received incorrecty membership message of type 0x%x\n", service_type);
+            } else
+                printf("received message of unknown message type 0x%x with ret %d\n", service_type, ret);
         }
-    } else if (Is_reject_mess(service_type)) {
-		printf("REJECTED message from %s, of servicetype 0x%x messtype %d, (endian %d) to %d groups \n(%d bytes): %s\n",
-			sender, service_type, mess_type, endian_mismatch, num_groups, ret, mess);
-	} else {
-        printf("received message of unknown message type 0x%x with ret %d\n", service_type, ret);
-    }
-    
+    }   
     if(DEBUG){
         gettimeofday(&read_end_time, 0);  // End of read function (including burst, if there was one)
         int total_time = (read_end_time.tv_sec*1e6 + read_end_time.tv_usec)
@@ -300,7 +290,7 @@ static void	Read_message() {
 
 static void Usage(int argc, char *argv[])
 {
-	sprintf( User, "bglickm1" );
+	sprintf( User, "ebennis1" );
 	sprintf( Spread_name, "4803");
     sprintf( group, "ebennis1"); // TODO: trolololol
 
@@ -317,12 +307,12 @@ static void Usage(int argc, char *argv[])
             exit(0);
         }
         /* Open file writer */
-        char file_name[15];
-        sprintf(file_name, "%d", process_index);
-        if((fd = fopen(strcat(file_name, ".out"), "w")) == NULL) {
-            perror("fopen failed to open file for writing");
-            exit(0);
-        }
+//        char file_name[15];
+//        sprintf(file_name, "%d", process_index);
+//        if((fd = fopen(strcat(file_name, ".out"), "w")) == NULL) {
+//            perror("fopen failed to open file for writing");
+//            exit(0);
+//        }
     }
 }
 
@@ -337,10 +327,10 @@ static void	Bye()
 {
     printf("Closing file.\n");
 
-    if (fd != NULL) {
-        fclose(fd);
-        fd = NULL;
-    }
+//    if (fd != NULL) {
+//        fclose(fd);
+//        fd = NULL;
+//    }
 
 	printf("\nExiting mcast.\n");
 	SP_disconnect( Mbox );
