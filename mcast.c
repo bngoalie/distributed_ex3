@@ -164,10 +164,6 @@ static void	burst_message(int burst_size)
     }
 }
 
-/* TODO: FIX THE FIXME */
-/* FIXME: The user.c code does not use memcpy()s to avoid bus errors when
- *        dereferencing a pointer into a potentially misaligned buffer */
-
 static void	Read_message() {
     /* Local vars */
     static char	    mess[MAX_MESSLEN];
@@ -182,9 +178,6 @@ static void	Read_message() {
     int		        ret;
     Message         *message;
 
-    /* TODO: Poll here */
-
-    /* TODO: Start loop here */
     service_type = 0;
 	ret = SP_receive(Mbox, &service_type, sender, MAX_GROUPS, &num_groups, target_groups, 
 		&mess_type, &endian_mismatch, sizeof(mess), mess);
@@ -197,17 +190,20 @@ static void	Read_message() {
 		Bye();
 	}
 
-	if(Is_regular_mess(service_type)) {
-		
+	if(Is_regular_mess(service_type)) { // Regular message
+	
+        /* Check if message has agreed service type */	
 		if (!Is_agreed_mess(service_type)) {
             perror("mcast: non-agreed service message received\n");
             Bye();
         }
+
 		if (DEBUG) { 
             printf("message from %s, of type %d, (endian %d) to %d groups \n(%d bytes): %s\n",
 			sender, mess_type, endian_mismatch, num_groups, ret, mess);
             printf("%d message received\n", num_messages_received+1);
         }
+
         /* Done for more readable code for writing to file. */
         message = (Message *)mess;
         if (message->message_index >= 0) {
@@ -216,8 +212,8 @@ static void	Read_message() {
             fprintf( fd, "%2d, %8d, %8d\n", message->process_index, message->message_index, message->rand);
         }
 
+        /* Check if all machines have finished */
         if (mess_type == 1 && ++num_finished_processes == num_processes) {
-            /* All processes have finished sending (and therefore, all are done receiving).*/
             gettimeofday(&end_time, 0);
             int total_time = (end_time.tv_sec*1e6 + end_time.tv_usec)
                 - (start_time.tv_sec*1e6 + start_time.tv_usec);
@@ -227,6 +223,8 @@ static void	Read_message() {
  
             Bye();
         }
+
+        /* Burst more messages if we've received messages from a new (previous) burst */
         if (Num_sent < num_messages && message->process_index == process_index 
             && (message->message_index % BURST_SIZE) == BURST_OFFSET) {
             burst_message(BURST_SIZE);
