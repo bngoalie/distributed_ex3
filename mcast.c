@@ -166,7 +166,7 @@ static void	burst_message(int burst_size)
 
 static void	Read_message() {
     /* Local vars */
-    static char	    mess[MAX_MESSLEN];
+    char	    mess[MAX_MESSLEN];
     char		    sender[MAX_GROUP_NAME];
     char		    target_groups[MAX_GROUPS][MAX_GROUP_NAME];
     membership_info memb_info;
