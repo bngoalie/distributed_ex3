@@ -248,7 +248,7 @@ static void	Read_message() {
         if (message->message_index >= 0) {
             num_messages_received++;
             /* Write message content to file. */
-//            fprintf( fd, "%2d, %8d, %8d\n", message->process_index, message->message_index, message->rand);
+            fprintf( fd, "%2d, %8d, %8d\n", message->process_index, message->message_index, message->rand);
         }
 
         /* Check if all machines have finished */
@@ -330,12 +330,12 @@ static void Usage(int argc, char *argv[])
             exit(0);
         }
         /* Open file writer */
-//        char file_name[15];
-//        sprintf(file_name, "%d", process_index);
-//        if((fd = fopen(strcat(file_name, ".out"), "w")) == NULL) {
-//            perror("fopen failed to open file for writing");
-//            exit(0);
-//        }
+        char file_name[15];
+        sprintf(file_name, "%d", process_index);
+        if((fd = fopen(strcat(file_name, ".out"), "w")) == NULL) {
+            perror("fopen failed to open file for writing");
+            exit(0);
+        }
     }
 }
 
@@ -352,12 +352,16 @@ static void	Bye()
 {
     printf("Closing file.\n");
 
-//    if (fd != NULL) {
-//        fclose(fd);
-//        fd = NULL;
-//    }
+    if (fd != NULL) {
+        fclose(fd);
+        fd = NULL;
+    }
 
-	printf("\nExiting mcast.\n");
+    /* Free memory from message burst */
+    for (int i = 0; i < BURST_SIZE_INIT; i++)
+        free(messages[i]);
+	
+    printf("\nExiting mcast.\n");
 	SP_disconnect( Mbox );
 	exit( 0 );
 }
