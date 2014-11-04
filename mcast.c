@@ -70,7 +70,7 @@ char        Spread_name[80];
 char        Private_group[MAX_GROUP_NAME];
 char        group[MAX_GROUP_NAME];
 mailbox     Mbox;
-Message     *messages[BURST_SIZE_INIT];
+Message     messages[BURST_SIZE_INIT];
 int	        Num_sent;
 struct      timeval start_time;
 struct      timeval end_time;
@@ -98,10 +98,6 @@ int main( int argc, char *argv[] )
     test_timeout.sec = 0;
     test_timeout.usec = 100000;
 
-    /* Allocate memory for message burst */
-    for (int i = 0; i < BURST_SIZE_INIT; i++)
-        messages[i] = malloc(sizeof(Message));
-    
     /* Parse arguments, display usage if invalid */
     Usage(argc, argv);
 
@@ -139,13 +135,13 @@ static void	burst_message(int burst_size)
 	int	            ret;
     int             mess_type = 0;
 	int	            i;
-    int             burst_sent = 0;
     struct          timeval burst_start_time;
     struct          timeval burst_end_time;
     
     if(DEBUG)
-        gettimeofday(&burst_start_time, 0);  // Start of read function
+        gettimeofday(&burst_start_time, 0);  // Start of burst function
 
+    /* If no messages to send, send done inidcator */
     if (num_messages == 0) {
         mess_type = 1;
         ((Message *)(mess))->message_index = -1;
@@ -158,22 +154,14 @@ static void	burst_message(int burst_size)
         }
     }
 
-    for (i=0; i < burst_size && Num_sent+1 <= num_messages; i++) {
-        messages[i]->process_index = process_index;
-        messages[i]->message_index = Num_sent;
-        messages[i]->rand = (rand() % RAND_RANGE_MAX) + 1;
-
-        burst_sent++;
-        Num_sent++;
-    }
-
-    for (i=0; i < burst_sent; i++) {
+    /* Send burst_size messages */
+    for (i=0; i < burst_size; i++) {
         /* Process has sent all its messages. */
-        if (i == burst_sent-1 && Num_sent == num_messages) {
+        if (i == burst_size-1 && Num_sent == num_messages) {
             /* Set mess_type to indicate that it is last message (process is done). */
             mess_type = 1;
         }
-        ret= SP_multicast(Mbox, AGREED_MESS, group, mess_type, sizeof(Message), (char *)messages[i]);
+        ret= SP_multicast(Mbox, AGREED_MESS, group, mess_type, sizeof(Message), (char *)&messages[i]);
 
         if(ret < 0) 
         {
@@ -262,12 +250,23 @@ static void	Read_message() {
  
             Bye();
         }
+        /* Check if message is from self */
+        if (message->process_index == process_index && Num_sent < num_messages) {
+            /* Create new message */
+            messages[Num_sent%BURST_SIZE].process_index = process_index;
+            messages[Num_sent%BURST_SIZE].message_index = Num_sent;
+            messages[Num_sent%BURST_SIZE].rand = (rand() % RAND_RANGE_MAX) + 1;
+            Num_sent++;
+            if (Num_sent == num_messages){
+                burst_message((Num_sent%BURST_SIZE)+1);
+            }
+            /* Burst more messages if we've received messages from a new (previous) burst */
+            else if (Num_sent%BURST_SIZE == BURST_SIZE - 1) {
+                burst_message(BURST_SIZE);
+            }
 
-        /* Burst more messages if we've received messages from a new (previous) burst */
-        if (Num_sent < num_messages && message->process_index == process_index 
-            && (message->message_index % BURST_SIZE) == BURST_OFFSET) {
-            burst_message(BURST_SIZE);
         }
+
 	} else if(Is_membership_mess(service_type)) {   // Membership message
         ret = SP_get_memb_info(mess, service_type, &memb_info);
         if (ret < 0) {
@@ -291,7 +290,14 @@ static void	Read_message() {
                 if (num_groups == num_processes) {
                     printf("Full group membership acheived\n");
                     gettimeofday(&start_time, 0);
-                    burst_message(BURST_SIZE_INIT);
+                    int n;
+                    for(n = 0; n < BURST_SIZE_INIT && Num_sent < num_messages; n++) { // Create messages
+                        messages[n].process_index = process_index;
+                        messages[n].message_index = Num_sent;
+                        messages[n].rand = (rand() % RAND_RANGE_MAX) + 1;
+                        Num_sent++;
+                    }
+                    burst_message(n);
                 }
 			} else if (Is_caused_leave_mess( service_type)){    // Leave message
 				printf("Due to the LEAVE of %s\n", memb_info.changed_member);
@@ -357,10 +363,6 @@ static void	Bye()
         fd = NULL;
     }
 
-    /* Free memory from message burst */
-    for (int i = 0; i < BURST_SIZE_INIT; i++)
-        free(messages[i]);
-	
     printf("\nExiting mcast.\n");
 	SP_disconnect( Mbox );
 	exit( 0 );
