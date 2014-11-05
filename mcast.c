@@ -257,16 +257,17 @@ static void	Read_message() {
             messages[Num_sent%BURST_SIZE].message_index = Num_sent;
             messages[Num_sent%BURST_SIZE].rand = (rand() % RAND_RANGE_MAX) + 1;
             Num_sent++;
-            if (Num_sent == num_messages){
-                burst_message((Num_sent%BURST_SIZE)+1);
-            }
-            /* Burst more messages if we've received messages from a new (previous) burst */
-            else if (Num_sent%BURST_SIZE == BURST_SIZE - 1) {
+
+            /* Burst if we have 20 messages */
+            if (Num_sent%BURST_SIZE == 0) {
                 burst_message(BURST_SIZE);
             }
-
+            /* Else, if message is last message to send, burst what we have */
+            else if (Num_sent == num_messages){
+                
+                burst_message((Num_sent%BURST_SIZE));
+            }
         }
-
 	} else if(Is_membership_mess(service_type)) {   // Membership message
         ret = SP_get_memb_info(mess, service_type, &memb_info);
         if (ret < 0) {
