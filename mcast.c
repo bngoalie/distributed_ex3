@@ -322,7 +322,7 @@ static void Usage(int argc, char *argv[])
 {
 	sprintf( User, "ebennis1" );
 	sprintf( Spread_name, "4803");
-    sprintf( group, "ebennis1"); // TODO: trolololol
+    sprintf( group, "bglickm1");
 
     if (argc != 4) {
         Print_help();
